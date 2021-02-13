@@ -1,0 +1,441 @@
+#!/usr/bin/perl
+#
+# (C) COPYRIGHT International Business Machines Corp. 1999
+# All Rights Reserved
+#
+
+#------ sendmailパスの指定 ----------------------------------------------
+# 以下の、$mailprogに、サーバー上にある"sendmail"コマンドをフルパスで
+# 記入します。詳しくは、プロバイダのガイドに従ってください。
+# (例) $mailprog = '/usr/lib/sendmail';
+$mailprog = '/usr/sbin/sendmail';
+#------------------------------------------------------------------------
+#------ メールアドレスの指定 ------------------------------------------
+# 以下の、$mailtoに、感想の送り先となるメールアドレスを記入します。
+# (例) $mailto = 'mailaddress@sample.ibm.jp';
+#$mailto = 'wy_nagai@zcar.info';
+$mailfrom = 'omura@z32-zone.com';
+$mailto = 'omura@z32-zone.com';
+#------------------------------------------------------------------------
+require 'Scripts/jcode.pl';
+require 'Scripts/common.cgi';
+require 'Scripts/smtp.pl';
+
+#Get the input
+read (STDIN, $buffer, $ENV{'CONTENT_LENGTH'});
+
+#Split the name-value pairs
+@pairs = split (/&/,$buffer);
+
+foreach $pair(@pairs)
+{
+    ($name, $value) = split(/=/, $pair);
+
+    #Un-Webify plus signs and %-encoding
+    $value=~tr/+/ /;
+    $value=~s/%([a-fA-F0-9][a-fA-F0-9])/pack("C",hex($1))/eg;
+
+    $FORM{$name} = $value;
+    if ( $name ne "to" ) {
+       push (@fields, $name) unless (grep(/^$name$/, @fields));
+    }
+}
+
+#チェック処理
+
+#必須チェック
+&input_check($FORM{comment},'comment');
+&input_check($FORM{Mail},'Mail');
+&input_check2($FORM{Mail},$FORM{Mail_check});
+
+	#日本語がない場合は排除する
+	if ($FORM{comment} !~ /(\x82[\x9F-\xF2])|(\x83[\x40-\x96])/) {
+		&error("Error355");
+		exit(0);
+	}
+
+	#URL(buy)の複数書き込みを禁止する 
+	$urlnum = ($FORM{comment} =~ s/buy/buy/ig);
+	if ($urlnum >= 3) { &error("Error359"); exit(0);}
+
+	#URL(http://～)の複数書き込みを禁止する http://swanbay-web.hp.infoseek.co.jp/index.html
+	$urlnum = ($FORM{comment} =~ s/http/http/ig);
+	if ($urlnum >= 3) { &error("Error356"); exit(0);}
+
+	#URL(com)の複数書き込みを禁止する 
+	$urlnum = ($FORM{comment} =~ s/com/com/ig);
+	if ($urlnum >= 3) { &error("Error357"); exit(0);}
+	
+	#URL(com)の複数書き込みを禁止する 
+	$urlnum = ($FORM{comment} =~ s/www/www/ig);
+	if ($urlnum >= 3) { &error("Error358"); exit(0);}
+
+
+
+#メールアドレスのチェック追加
+&mail_check($FORM{Mail});
+
+#
+### 送信フォーマット
+#
+
+$mail_msg = "";
+
+foreach $field (@fields) {
+    $mail_msg = "$mail_msg-----------------------------------------------\n";
+    $mail_msg = "$mail_msg($field) $FORM{$field}\n";
+}
+$mail_msg = "$mail_msg-----------------------------------------------\n";
+
+#
+
+$body = <<END_MESSAGE;
+[お問合せ種別]$FORM{category}
+[ email ] $FORM{Mail}
+[ お名前 ] $FORM{Name}
+[ フリガナ ]$FORM{kana}
+[ 年齢／性別 ]$FORM{age}/$FORM{sex}
+[ Z情報 ]
+$FORM{ztype}
+$FORM{TT}/$FORM{seat}/$FORM{MT}
+[ ご住所 ]
+〒$FORM{postcode}
+$FORM{city}
+$FORM{city2}
+[ 電話番号 ]
+$FORM{phone}
+[ ご用件 ] 
+$FORM{comment}
+
+END_MESSAGE
+
+$header = <<END_MESSAGE;
+$FORM{Name}様
+─ご送信内容の確認───────────────────────────
+この度はお問い合せ頂き誠にありがとうございました。
+改めて担当者よりご連絡をさせていただきます。
+END_MESSAGE
+
+$footer = <<END_MESSAGE;
+────────────────────────────────────
+このメールに心当たりの無い場合は、お手数ですが
+下記連絡先までお問い合わせください。
+
+この度はお問い合わせ重ねて\お\礼\申\し上げます。
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+FAIRLADY Z PRO SHOP Zone
+〒252-0243
+神奈川県相模原市中央区上溝2346-19
+e-mail:omura\@z32-zone.com
+official web site URL:http://www.z32-zone.com/main.html
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+END_MESSAGE
+
+$header2 = <<END_MESSAGE;
+ご担当者様
+─ご送信内容───────────────────────────
+HPより下記の問い合わせがありました。
+内容をご確認いただき、お客様への返信、連絡をお願いいたします。
+
+END_MESSAGE
+
+$mail_msg=$header.$body.$footer;
+$mail_msg2=$header2.$body.$footer;
+
+### ShiftJis to Jis
+#
+&jcode'convert(*mail_msg, 'jis');
+&jcode'convert(*mail_msg2, 'jis');
+
+
+#お客様
+$subject='[FAIRLADY Z PRO SHOP Zone]お問い合わせ確認メール';
+&sendmail2($mailprog,$mailfrom,$FORM{Mail},$subject,$mail_msg);
+
+#管理側
+$subject='[FAIRLADY Z PRO SHOP Zone]お問い合わせメール';
+&sendmail2($mailprog,$FORM{Mail},$mailto,$subject,$mail_msg2);
+
+$mailto = 'webmaster@zcar-owners.net';
+#falcon
+$subject='[FAIRLADY Z PRO SHOP Zone]お問い合わせメール';
+&sendmail2($mailprog,$FORM{Mail},$mailto,$subject,$mail_msg2);
+
+open(LOG, >> mail.txt);
+print LOG "$FORM{Mail}" . "\n";
+print LOG "$mail_msg2" . "\n";
+close(LOG);
+
+#open(MAIL,"| $mailprog $mailto")|| die "Can't open $mailprog!\n";
+#print MAIL $mail_msg;
+#close(MAIL);
+#
+### Make the person feel good for writing to us
+#
+#	print <<"EOF";
+#print "Content-type: text/html\n\n";
+#print "<HTML><HEAD><TITLE>お問い合わせありがとうございます。Thank you! 萱島酒造有限会社</TITLE></HEAD>\n";
+#print "<BODY bgcolor=\"#9dffff\">\n";
+#print "<H2 align=\"center\">お問い合せありがとうございます。</H2>\n";
+#print "<p align=\"center\"><a href=\"http://www.nishinoseki.com/\">戻る</a></p>\n";
+#print "</BODY></HTML>\n";
+#EOF
+	print <<"EOF";
+
+<!doctype html>
+<html><!-- InstanceBegin template="/Templates/base_2Column.dwt" codeOutsideHTMLIsLocked="false" -->
+<head>
+<meta charset="shift_jis">
+<!-- InstanceBeginEditable name="doctitle" -->
+<title>【Ｚｏｎｅ】FAIRLADY Z32 PRO SHOP（ゼットワン フェアレディZ32専門店/プロショップ）お問い合わせ</title>
+<!-- InstanceEndEditable -->
+<!--[if lt IE 9]>
+<script src="http://html5shim.googlecode.com/svn/trunk/html5.js"></script>
+<![endif]--><script type="text/javascript" src="Scripts/rollover2.js"></script>
+<script type="text/javascript" src="Scripts/scrollsmoothly.js"></script>
+<link rel="stylesheet" href="nivo-slider/nivo-slider.css" type="text/css" media="screen" />
+<link href="css/base.css" rel="stylesheet" type="text/css">
+<link href="css/navi.css" rel="stylesheet" type="text/css">
+<link href="css/page.css" rel="stylesheet" type="text/css">
+<!-- InstanceBeginEditable name="head" -->
+<meta name="description" content="フェアレディZ32専門店 Zone｜名車Z32を後世に残すことが私達の使命です。 メンテナンス・修理・車検・ドレスアップ受付中。 当店ならではの充実した質の高いサービスを豊富にご用意しております。" />
+<meta name="keywords" content="FAIRLADY Z32,フェアレディZ32,フェアレディZ中古車販売,フェアレディZ買い取り,オリジナルパーツ,ドレスアップ,メンテナンス,車検,Zone,ゼットワン" />
+<!-- InstanceEndEditable -->
+<script language="JavaScript">
+<!--
+flag=0;
+function doclear(target) {
+if (target=='comment') {
+if (flag==0) {
+flag=1;
+document.address.comment.value = "";
+}
+}
+else {
+document.address.comment.value = "";
+}
+}
+//-->
+</script>
+<script type="text/javascript" src="Scripts/postcode.js"></script>
+<script type="text/javascript" src="Scripts/typing.js"></script>
+</head>
+
+<body>
+<div id="container">
+<header id="header"><!-- InstanceBeginEditable name="H1text" -->
+<h1>★国内唯一フェアレディＺ３２オンリー専門店。 ★名車Ｚ３２を後世に残すことが私達の使命です。<br>
+ ★Ｚ３２のメンテナンス＆ドレスアップ等お任せください。 ★遠方の方もお気軽にご相談ください。</h1>
+<!-- InstanceEndEditable -->
+<a href="index.html"><img src="images/logo.png" width="260" height="97" alt="FAIRLADY Z32 PRO SHOP Zone" id="head-logo" /></a>
+<div id="head-tel">
+<a href="#"></a>
+<p><a href="access.html"><img src="images/head_btn1_off.jpg" width="94" height="28" alt="アクセス・マップ"></a></p>
+<p><a href="mailto:&#111;&#109;&#117;&#114;a&#64;z32&#45;&#122;o&#110;&#101;.c&#111;m"><img src="images/head_btn2_off.jpg" width="94" height="28" alt="Eメール"></a></p>
+</div>
+</header>
+
+<nav id="head-nav">
+<ul id="navi-main">
+<li><a href="index.html"><img src="images/navi/001_off.png" alt="HOME" width="81" height="20" /></a></li>
+<li><a href="hanbai.html"><img src="images/navi/002_off.png" alt="販売車両" width="114" height="20" /></a></li>
+<li><a href="order.html"><img src="images/navi/003_off.png" alt="Zオーダー" width="115" height="20" /></a></li>
+<li><a href="kaitori.html"><img src="images/navi/004_off.png" alt="買い取り" width="115" height="20" /></a></li>
+<li><a href="parts_original.html"><img src="images/navi/005_off.png" alt="オリジナルパーツ" width="115" height="20" /></a></li>
+<li><a href="parts_used.html"><img src="images/navi/006_off.png" alt="中古パーツ" width="115" height="20" /></a></li>
+<li><a href="dressedup.html"><img src="images/navi/007_off.png" alt="ドレスアップ" width="115" height="20" /></a></li>
+<li><a href="maintenance.html"><img src="images/navi/008_off.png" alt="メンテナンス" width="115" height="20" /></a></li>
+<li><a href="contact.html"><img src="images/navi/009_off.png" alt="お問い合わせ" width="115" height="20" /></a></li>
+</ul>
+<ul id="navi-sub">
+<li><a href="shopinfo.html">お店紹介</a></li>
+<li><a href="privacypolicy.html">個人情報保護方針</a></li>
+<li><a href="tradelaw.html">通信販売法に基づく表示</a></li>
+<li><a href="link.html">リンク</a></li>
+</ul>
+</nav>
+
+<article>
+<div id="contents">
+<!-- InstanceBeginEditable name="MAIN-IMG" --><!-- InstanceEndEditable -->
+<div id="side-L">
+<!-- InstanceBeginEditable name="SIDE-L-CONTENTS" -->
+<h2>お問い合わせ</h2>
+<div class="comBox">
+<h3>お問い合わせありがとうございます。FAIRLADY Z PRO SHOP Zone</h3>
+
+            <TABLE border="0">
+              <TBODY>
+                <TR>
+                  <TD align="left" ><B><FONT size="+1">お問合せありがとうございました。</FONT></B></TD>
+                </TR>
+              </TBODY>
+            </TABLE>
+            <TABLE border="0">
+              <TBODY>
+                <TR>
+                  <TD>【確認フォーム】<br>
+                    <FONT size="-1">ご記入いただきましたメールアドレスにお問い合わせ内容のメールを送付させていただきました。<br>
+                    折り返し弊社担当よりお問い合わせ内容についてのご返信をさせていただきます。<br>
+                  頂いた個人情報は当社規定の利用以外は、使用いたしません。<BR>
+                  </FONT></TD>
+                </TR>
+                <TR>
+              </TBODY>
+            </TABLE>
+            <TABLE border="0" width="100%">
+              <TBODY>
+                <TR>
+                  <TD align="center">
+                  <TABLE>
+                    <TBODY>
+                      <tr>
+                        <TH nowrap><font size="2"><br>
+                          お問い合せ種別<br>
+                          </font><span><font size="1" color="#C0C0C0">inquiry   
+                          category</font></span><font size="2"><BR>     
+                          </font></TH>     
+                        <TD>$FORM{category}</TD>     
+                      </tr>  
+                      <tr>  
+                        <TH nowrap><font size="2"><br>  
+                          </font><font size="2">  
+                          お問い合せ車種<br>  
+                          </font><span><font size="1" color="#C0C0C0">inquiry                 
+                          Zcar</font></span><font size="2"><BR>      
+                          </font></TH>      
+                        <TD>$FORM{ztype}</TD>     
+                      </tr>  
+                      <tr>  
+                        <TH nowrap><font size="2"><br>  
+                          </font><font size="2">               
+                          車種タイプ<br>               
+                          </font><span><font size="1" color="#C0C0C0">Zcar                 
+                          type</font></span><font size="2"><BR>      
+                          </font></TH>      
+                        <TD>$FORM{TT}/$FORM{seat}/$FORM{MT}</TD>    
+                      </tr> 
+                      <TR> 
+                        <TH nowrap><font size="2"><br> 
+                          お問い合せ内容<br> 
+                          </font><span><font size="1" color="#C0C0C0">inquiry      
+                          body</font></span><font size="2"><BR>     
+                          </font></TH>     
+                        <TD>$FORM{comment}</TD>     
+                      </TR>     
+                      <TR>     
+                        <TH nowrap><font size="2">ご住所<br>     
+                          </font><font size="1" color="#C0C0C0">address</font><font size="2"><br>     
+                          </font></TH>     
+                        <TD>     
+						<table border="0" cellspacing="10" cellpadding="0">     
+							<tr>     
+								<td>〒$FORM{postcode}</td>     
+								<td>&nbsp;</td>     
+								<td></td>     
+							</tr>     
+							<tr>     
+								<td colspan="4" nowrap><span><font size="2">【市区町村】</font>$FORM{city}</span><br>    
+                                  【<span><font size="2">丁目番地】</font>$FORM{city2}</span></td>    
+							</tr>    
+						</table>    
+                        </TD>    
+                      </TR>    
+                      <TR>    
+                        <TH nowrap><font size="2">年令・性別<br>    
+                          </font><font size="1" color="#C0C0C0">age/<span>sex</span></font></TH>    
+                        <TD>$FORM{age}/$FORM{sex}</TD>  
+                      </TR>  
+                      <tr>  
+                        <TH nowrap><font size="2">お名前（漢字）<br>  
+                          </font><span><font size="1" color="#C0C0C0">your name</font></span></TH>     
+                        <TD>$FORM{Name}</TD>     
+                      </tr>     
+                      <TR>     
+                        <TH nowrap><font size="2">お名前（カナ）<br>     
+                          </font><span><font size="1" color="#C0C0C0">assumed      
+                          name</font></span></TH>     
+                        <TD>$FORM{kana}</TD>    
+                      </TR>    
+                      <TR>    
+                        <TH nowrap><font size="2">電話番号<br>    
+                          </font><span><font size="1" color="#C0C0C0">telephone      
+                          number</font></span></TH>     
+                        <TD>$FORM{phone}</TD>    
+                      </TR>    
+                      <tr>    
+                        <TH nowrap><font size="2">メールアドレス<br>    
+                          </font><font size="1"><span><font color="#C0C0C0">mail      
+                          address</font></span><br>     
+                          </font>     
+                        </TH>     
+                        <TD>$FORM{Mail}</TD>    
+                      </tr>    
+                    </TBODY>    
+                  </TABLE>    
+                  </TD>    
+                      </TR>    
+              </TBODY>    
+            </TABLE>    
+            </TD>    
+          </TR>    
+        </TBODY>    
+      </TABLE>    
+
+</div>
+<!-- InstanceEndEditable --></div>
+<div id="side-R">
+<div class="bnrBox opacity">
+<p><a href="hanbai.html"><img src="images/bnr_hanbai.jpg" width="310" height="110" alt="販売車両一覧"></a></p>
+<p><a href="kaitori.html"><img src="images/bnr_kaitori.jpg" width="310" height="110" alt="愛車買い取り"></a></p>
+<p><a href="maintenance.html"><img src="images/bnr_maintebance.jpg" width="310" height="110" alt="Z32 メンテナンス"></a></p>
+</div>
+
+<div class="bnrBox2 opacity">
+<table width="100%" border="0" cellspacing="0" cellpadding="0">
+<tr>
+<td colspan="2"><a href="http://www.z32-zone.com/blog/" target="_blank"><img src="images/sidebnr_blog.jpg" alt="ゼットワンのブログ" width="310" height="100"></a></td>
+</tr>
+<tr>
+<td><a href="https://www.facebook.com/pages/Fairlady-Z32-Proshop-Zone/286263454768481" target="_blank"><img src="images/sidebnr_facebook.jpg" alt="Zone Facebook" width="150" height="60"></a></td>
+<td align="right"><a href="http://www.youtube.com/user/ZoneZ32" target="_blank"><img src="images/sidebnr_youtube.jpg" alt="Zone YouTube" width="150" height="60"></a></td>
+</tr>
+<tr>
+<td><a href="http://sellinglist.auctions.yahoo.co.jp/user/zone_z32" target="_blank"><img src="images/sidebnr_yahoo.jpg" alt="Zone Yahoo!オークション" width="150" height="60"></a></td>
+<td align="right"><a href="http://www.goo-net.com/usedcar_shop/0550668/stock.html" target="_blank"><img src="images/sidebnr_goo.jpg" alt="Zone グーネット" width="150" height="60"></a></td>
+</tr>
+</table>
+</div>
+
+<nav>
+<ul class="navi-side">
+<li><a href="event.html">過去の参加イベント/オフ会</a></li>
+<li><a href="owner">お客様愛車紹介</a></li>
+</ul>
+</nav>
+
+<!-- InstanceBeginEditable name="SIDE-INFO" --><!-- InstanceEndEditable --></div>
+<br style="clear: both;" />
+
+</div>
+</article>
+<p class="pagetop"><a href="#header"><img src="images/pagetop.gif" alt="このページのトップへ" width="132" height="20" /></a></p>
+
+<footer id="footer">
+<address>
+<strong>株式会社Ｚｏｎｅ（ゼットワン）</strong><br />
+〒252-0243　神奈川県相模原市中央区上溝2346-19<br />
+Open：10:15-18:30　Close：木 ｜ TEL：042-703-6670 ｜ FAX：042-703-6671 ｜ E-Mail：<a href="mailto:&#111;&#109;&#117;&#114;a&#64;z32&#45;&#122;o&#110;&#101;.c&#111;m">&#111;&#109;&#117;&#114;a&#64;z32&#45;&#122;o&#110;&#101;.c&#111;m</a>
+</address>
+<p id="footlink"><a href="index.html">ホーム</a> ｜ <a href="hanbai.html">販売車両</a> ｜ <a href="order.html">Ｚオーダー</a> ｜ <a href="kaitori.html">買取</a> ｜ <a href="parts_original.html">オリジナルパーツ</a> ｜ <a href="parts_used.html">中古パーツ</a> ｜ <a href="dressedup.html">ドレスアップ</a> ｜ <a href="maintenance.html">メンテナンス</a> ｜ <a href="event.html">過去の参加イベント/オフ会</a> ｜ <a href="owner.html">お客様愛車紹介</a><br />
+<a href="shopinfo.html">お店紹介</a> ｜ <a href="access.html">アクセス・マップ</a> ｜ <a href="link.html">リンク</a> ｜ <a href="privacypolicy.html">個人情報保護方針</a> ｜ <a href="tradelaw.html">通信販売法に基づく表示</a> ｜ <a href="contact.html">お問い合わせ</a><br />
+[ <a href="http://www.z32-zone.com/blog/" target="_blank">BLOG</a> ]　[ <a href="https://www.facebook.com/pages/Fairlady-Z32-Proshop-Zone/286263454768481" target="_blank">Facebook</a> ]　[ <a href="http://www.youtube.com/user/ZoneZ32" target="_blank">YouTube</a> ]　[ <a href="http://sellinglist.auctions.yahoo.co.jp/user/zone_z32" target="_blank">ヤフオク!</a> ]　[ <a href="http://www.goo-net.com/usedcar_shop/0550668/stock.html" target="_blank">Goo-net</a> ]</p>
+<a href="http://www.a-vipc.com/" target="_blank"></a>
+<p id="copyright">Copyright &copy; Zone Co.,Ltd. All rights reserved.</p>
+</footer>
+</div>
+</body>
+<!-- InstanceEnd --></html>
+
+
+EOF
