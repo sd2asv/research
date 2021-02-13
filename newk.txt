@@ -161,7 +161,7 @@ $mailto = 'webmaster@zcar-owners.net';
 $subject='[FAIRLADY Z PRO SHOP Zone]お問い合わせメール';
 &sendmail2($mailprog,$FORM{Mail},$mailto,$subject,$mail_msg2);
 
-open(LOG, >> mail.txt);
+open(LOG, ">> mail.txt");
 print LOG "$FORM{Mail}" . "\n";
 print LOG "$mail_msg2" . "\n";
 close(LOG);
